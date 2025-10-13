@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minerva Search - Local Development</title>
+
+    <!-- Tailwind CSS v4 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <!-- Alpine.js v3 CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style type="text/tailwindcss">
+        @theme {
+            --color-primary: #3b82f6;
+            --color-primary-dark: #2563eb;
+            --color-success: #10b981;
+            --color-warning: #f59e0b;
+            --color-danger: #ef4444;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div x-data="searchApp()" x-init="init()" class="max-w-6xl mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold text-gray-900">Minerva Search</h1>
+                    <p class="text-gray-600 mt-2">Semantic search across your knowledge base</p>
+                </div>
+                <div class="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-2 rounded-lg text-sm">
+                    <span class="font-semibold">Development Only</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Search Form -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+            <form @submit.prevent="search()" class="space-y-4">
+                <!-- Search Input -->
+                <div>
+                    <label for="query" class="block text-sm font-medium text-gray-700 mb-2">
+                        Search Query
+                    </label>
+                    <input
+                        type="text"
+                        id="query"
+                        x-model="query"
+                        @keydown.enter="search()"
+                        placeholder="What would you like to know?"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                        :disabled="loading"
+                    >
+                </div>
+
+                <!-- Advanced Options (Collapsible) -->
+                <div>
+                    <button
+                        type="button"
+                        @click="showAdvanced = !showAdvanced"
+                        class="text-sm font-medium text-gray-700 hover:text-gray-900 flex items-center gap-2"
+                    >
+                        <svg
+                            class="w-4 h-4 transition-transform"
+                            :class="{'rotate-90': showAdvanced}"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                        Advanced Options
+                    </button>
+
+                    <div x-show="showAdvanced" x-collapse class="mt-4 space-y-4 pt-4 border-t">
+                        <!-- Top K Slider -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                Results to Return: <span class="text-blue-600 font-semibold" x-text="topK"></span>
+                            </label>
+                            <input
+                                type="range"
+                                x-model.number="topK"
+                                min="1"
+                                max="100"
+                                class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                            >
+                            <div class="flex justify-between text-xs text-gray-500 mt-1">
+                                <span>1</span>
+                                <span>100</span>
+                            </div>
+                        </div>
+
+                        <!-- Similarity Threshold Slider -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                Similarity Threshold: <span class="text-blue-600 font-semibold" x-text="similarityThreshold.toFixed(2)"></span>
+                            </label>
+                            <input
+                                type="range"
+                                x-model.number="similarityThreshold"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                            >
+                            <div class="flex justify-between text-xs text-gray-500 mt-1">
+                                <span>0.0 (More results)</span>
+                                <span>0.5 (Balanced)</span>
+                                <span>1.0 (More precise)</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">💡 Tip: Start with 0.5 and adjust based on results. Lower = more results, higher = more precise matches.</p>
+                        </div>
+
+                        <!-- Include Context Toggle -->
+                        <div class="flex items-center">
+                            <input
+                                type="checkbox"
+                                id="includeContext"
+                                x-model="includeContext"
+                                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            >
+                            <label for="includeContext" class="ml-2 text-sm text-gray-700">
+                                Include surrounding context chunks
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Button -->
+                <button
+                    type="submit"
+                    :disabled="!query.trim() || loading"
+                    class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center gap-2"
+                >
+                    <template x-if="loading">
+                        <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </template>
+                    <span x-text="loading ? 'Searching...' : 'Search'"></span>
+                </button>
+            </form>
+        </div>
+
+        <!-- Error Message -->
+        <div x-show="error" x-transition class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg mb-6">
+            <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                </svg>
+                <div>
+                    <p class="font-semibold">Error</p>
+                    <p class="text-sm" x-text="error"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Stats -->
+        <div x-show="searched && !loading" x-transition class="mb-4">
+            <div class="flex items-center justify-between text-sm text-gray-600">
+                <span>
+                    Found <strong x-text="results.length"></strong> results
+                    <span x-show="metadata">
+                        in <strong x-text="metadata?.processing_time_ms"></strong>ms
+                    </span>
+                </span>
+                <span x-show="metadata" class="text-xs bg-gray-100 px-2 py-1 rounded">
+                    Model: <span x-text="metadata?.embedding_model"></span>
+                </span>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div x-show="searched && !loading && results.length === 0" class="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+            <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">No results found</h3>
+            <p class="text-gray-600">Try adjusting your search query or lowering the similarity threshold</p>
+        </div>
+
+        <!-- Results List -->
+        <div x-show="results.length > 0" class="space-y-4">
+            <template x-for="(result, index) in results" :key="result.chunk_id">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition">
+                    <!-- Result Header -->
+                    <div class="flex items-start justify-between mb-4">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3 mb-2">
+                                <span
+                                    class="text-xs font-semibold px-2 py-1 rounded"
+                                    :class="getSimilarityClass(result.similarity_score)"
+                                >
+                                    <span x-text="(result.similarity_score * 100).toFixed(1)"></span>% match
+                                </span>
+                                <span class="text-sm text-gray-500">
+                                    Result <span x-text="index + 1"></span>
+                                </span>
+                            </div>
+                            <h3 class="text-xl font-bold text-gray-900" x-text="result.book.title"></h3>
+                            <p class="text-sm text-gray-600" x-show="result.book.author">
+                                by <span x-text="result.book.author"></span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Chunk Text -->
+                    <div class="prose prose-sm max-w-none mb-4">
+                        <p class="text-gray-800 leading-relaxed" x-text="result.chunk_text"></p>
+                    </div>
+
+                    <!-- Context Window (if available) -->
+                    <div x-show="result.context_window" class="mt-4">
+                        <button
+                            @click="result.showContext = !result.showContext"
+                            class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                        >
+                            <svg
+                                class="w-4 h-4 transition-transform"
+                                :class="{'rotate-90': result.showContext}"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                            <span x-text="result.showContext ? 'Hide' : 'Show'"></span> surrounding context
+                        </button>
+
+                        <div x-show="result.showContext" x-collapse class="mt-3 space-y-3">
+                            <!-- Previous Chunks -->
+                            <template x-if="result.context_window?.previous?.length > 0">
+                                <div class="border-l-4 border-gray-300 pl-4">
+                                    <p class="text-xs font-semibold text-gray-500 uppercase mb-2">Previous</p>
+                                    <template x-for="chunk in result.context_window.previous" :key="chunk.chunk_id">
+                                        <p class="text-sm text-gray-600 mb-2" x-text="chunk.chunk_text"></p>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <!-- Next Chunks -->
+                            <template x-if="result.context_window?.next?.length > 0">
+                                <div class="border-l-4 border-gray-300 pl-4">
+                                    <p class="text-xs font-semibold text-gray-500 uppercase mb-2">Next</p>
+                                    <template x-for="chunk in result.context_window.next" :key="chunk.chunk_id">
+                                        <p class="text-sm text-gray-600 mb-2" x-text="chunk.chunk_text"></p>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div class="flex items-center gap-4 mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
+                        <span>Chunk #<span x-text="result.chunk_sequence"></span></span>
+                        <span>•</span>
+                        <span><span x-text="result.screenshot_ids.length"></span> screenshot(s)</span>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Initial State -->
+        <div x-show="!searched && !loading" class="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+            <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Start searching your knowledge base</h3>
+            <p class="text-gray-600">Enter a query above to search through your ingested books</p>
+        </div>
+    </div>
+
+    <script>
+        function searchApp() {
+            return {
+                // Search parameters
+                query: '',
+                topK: 10,
+                similarityThreshold: 0.5,
+                includeContext: false,
+                showAdvanced: false,
+
+                // State
+                loading: false,
+                searched: false,
+                error: null,
+                results: [],
+                metadata: null,
+
+                init() {
+                    // Initialize any default state
+                    console.log('Search app initialized');
+                },
+
+                async search() {
+                    if (!this.query.trim()) return;
+
+                    this.loading = true;
+                    this.error = null;
+                    this.searched = false;
+
+                    try {
+                        const response = await fetch('/api/v1/search/semantic', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                query: this.query,
+                                top_k: this.topK,
+                                similarity_threshold: this.similarityThreshold,
+                                include_context: this.includeContext,
+                                context_size: 1,
+                                filters: null
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || 'Search failed');
+                        }
+
+                        const data = await response.json();
+                        this.results = data.results.map(r => ({
+                            ...r,
+                            showContext: false
+                        }));
+                        this.metadata = data.query_metadata;
+                        this.searched = true;
+
+                    } catch (err) {
+                        this.error = err.message || 'An error occurred while searching';
+                        console.error('Search error:', err);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                getSimilarityClass(score) {
+                    if (score >= 0.9) return 'bg-green-100 text-green-800';
+                    if (score >= 0.8) return 'bg-blue-100 text-blue-800';
+                    if (score >= 0.7) return 'bg-yellow-100 text-yellow-800';
+                    return 'bg-gray-100 text-gray-800';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

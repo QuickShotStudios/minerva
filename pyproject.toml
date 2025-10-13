@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "minerva"
+version = "0.1.0"
+description = "Dual-environment Python pipeline for automated Kindle book knowledge extraction into PostgreSQL vector database"
+authors = ["clizaola"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+# Core API dependencies (production)
+fastapi = ">=0.104"
+sqlmodel = ">=0.0.14"
+asyncpg = ">=0.29"
+openai = ">=1.12"
+pydantic-settings = ">=2.5"
+python-dotenv = ">=1.0"
+typer = ">=0.9"
+structlog = ">=24.1"
+alembic = ">=1.13"
+tiktoken = ">=0.5"
+pgvector = "^0.4.1"
+rich = ">=13.0"
+uvicorn = {extras = ["standard"], version = "^0.37.0"}
+
+[tool.poetry.group.ingestion.dependencies]
+# Local ingestion only (not needed in production API)
+playwright = ">=1.40"
+pillow = ">=10.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.4"
+pytest-asyncio = ">=0.23"
+httpx = ">=0.26"
+black = ">=24.1"
+ruff = ">=0.1"
+mypy = ">=1.8"
+pytest-cov = "^7.0.0"
+
+[tool.poetry.scripts]
+minerva = "minerva.cli.app:app"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

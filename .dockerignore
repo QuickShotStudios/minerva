@@ -1,0 +1,64 @@
+# Local data directories
+screenshots/
+exports/
+*.db
+*.sqlite
+
+# Development and testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+*.test.py
+scripts/test_*.py
+scripts/authenticate_*.py
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Environment files
+.env
+.env.*
+!.env.production.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# Poetry virtual environments
+.venv/
+venv/
+ENV/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

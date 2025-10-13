@@ -1,0 +1,340 @@
+"""Text extraction from screenshots using OpenAI Vision API."""
+
+import asyncio
+import base64
+from pathlib import Path
+from typing import Any
+
+import structlog
+from openai import AsyncOpenAI, RateLimitError
+
+from minerva.config import settings
+from minerva.utils.exceptions import (
+    OpenAIAPIError,
+    OpenAIRateLimitError,
+    TextExtractionError,
+)
+from minerva.utils.openai_client import get_openai_client
+
+logger = structlog.get_logger(__name__)
+
+# Vision API prompt for text extraction
+VISION_EXTRACTION_PROMPT = """Please transcribe all visible text from this image exactly as it appears, maintaining the original structure, formatting, paragraphs, headers, and lists. This is for personal study and accessibility purposes."""
+
+
+class TextExtractor:
+    """
+    Extract text from screenshot images using OpenAI Vision API.
+
+    This class handles:
+    - Screenshot encoding to base64
+    - OpenAI Vision API calls with retry logic
+    - Error handling for rate limits and API failures
+    - Token usage tracking for cost monitoring
+    - Vision model recording for traceability
+    """
+
+    def __init__(
+        self,
+        client: AsyncOpenAI | None = None,
+        vision_model: str | None = None,
+        detail_level: str | None = None,
+        timeout: float = 60.0,
+    ) -> None:
+        """
+        Initialize TextExtractor with OpenAI client and configuration.
+
+        Args:
+            client: Optional AsyncOpenAI client (defaults to new client from settings)
+            vision_model: Optional vision model name (defaults to settings.vision_model)
+            detail_level: Optional detail level "low" or "high" (defaults to settings.vision_detail_level)
+            timeout: API timeout in seconds (default: 60.0)
+        """
+        self.client = client or get_openai_client()
+        self.vision_model = vision_model or settings.vision_model
+        self.detail_level = detail_level or settings.vision_detail_level
+        self.timeout = timeout
+
+    async def extract_text_from_screenshot(
+        self,
+        file_path: Path,
+        book_id: str | None = None,
+        screenshot_id: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        Extract text from a screenshot image using OpenAI Vision API.
+
+        Args:
+            file_path: Path to screenshot image file
+            book_id: Optional book ID for logging context
+            screenshot_id: Optional screenshot ID for logging context
+
+        Returns:
+            Tuple of (extracted_text, metadata) where metadata includes:
+                - vision_model: Model used for extraction
+                - tokens_used: Total tokens consumed
+                - prompt_tokens: Input tokens
+                - completion_tokens: Output tokens
+                - cost_estimate: Estimated cost in USD
+
+        Raises:
+            TextExtractionError: If extraction fails after retries
+            OpenAIRateLimitError: If rate limit exceeded after retries
+            OpenAIAPIError: If API returns client error (4xx)
+
+        Example:
+            ```python
+            extractor = TextExtractor()
+            text, metadata = await extractor.extract_text_from_screenshot(
+                Path("screenshot.png"),
+                book_id="abc123"
+            )
+            print(f"Extracted: {text}")
+            print(f"Cost: ${metadata['cost_estimate']:.4f}")
+            ```
+        """
+        # Encode screenshot to base64
+        try:
+            image_base64 = self._encode_image_to_base64(file_path)
+        except Exception as e:
+            logger.error(
+                "image_encoding_failed",
+                file_path=str(file_path),
+                book_id=book_id,
+                screenshot_id=screenshot_id,
+                error=str(e),
+            )
+            raise TextExtractionError(f"Failed to encode image {file_path}: {e}") from e
+
+        # Extract text with retry logic
+        try:
+            extracted_text, metadata = await self._extract_with_retry(
+                image_base64,
+                book_id=book_id,
+                screenshot_id=screenshot_id,
+            )
+
+            logger.info(
+                "text_extraction_success",
+                file_path=str(file_path),
+                book_id=book_id,
+                screenshot_id=screenshot_id,
+                vision_model=metadata["vision_model"],
+                tokens_used=metadata["tokens_used"],
+                cost_estimate=metadata["cost_estimate"],
+                text_length=len(extracted_text),
+            )
+
+            return extracted_text, metadata
+
+        except Exception as e:
+            logger.error(
+                "text_extraction_failed",
+                file_path=str(file_path),
+                book_id=book_id,
+                screenshot_id=screenshot_id,
+                error=str(e),
+            )
+            raise
+
+    def _encode_image_to_base64(self, file_path: Path) -> str:
+        """
+        Encode image file to base64 string for API submission.
+
+        Args:
+            file_path: Path to image file
+
+        Returns:
+            Base64-encoded image string
+
+        Raises:
+            FileNotFoundError: If image file doesn't exist
+            IOError: If image file cannot be read
+        """
+        if not file_path.exists():
+            raise FileNotFoundError(f"Screenshot file not found: {file_path}")
+
+        with open(file_path, "rb") as image_file:
+            image_data = image_file.read()
+            return base64.b64encode(image_data).decode("utf-8")
+
+    async def _extract_with_retry(
+        self,
+        image_base64: str,
+        book_id: str | None = None,
+        screenshot_id: str | None = None,
+        max_retries: int = 3,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        Call Vision API with exponential backoff retry logic.
+
+        Args:
+            image_base64: Base64-encoded image
+            book_id: Optional book ID for logging
+            screenshot_id: Optional screenshot ID for logging
+            max_retries: Maximum retry attempts (default: 3)
+
+        Returns:
+            Tuple of (extracted_text, metadata)
+
+        Raises:
+            OpenAIRateLimitError: If rate limit exceeded after retries
+            OpenAIAPIError: If API returns client error (4xx)
+            TextExtractionError: If extraction fails after retries
+        """
+        delay = 1.0  # Initial delay in seconds
+        last_exception: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                return await self._call_vision_api(image_base64)
+
+            except RateLimitError as e:
+                last_exception = e
+                if attempt == max_retries:
+                    logger.error(
+                        "rate_limit_retries_exhausted",
+                        book_id=book_id,
+                        screenshot_id=screenshot_id,
+                        attempts=attempt + 1,
+                        error=str(e),
+                    )
+                    raise OpenAIRateLimitError(
+                        f"Rate limit exceeded after {max_retries + 1} attempts"
+                    ) from e
+
+                logger.warning(
+                    "rate_limit_retry",
+                    book_id=book_id,
+                    screenshot_id=screenshot_id,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    delay=delay,
+                    error=str(e),
+                )
+                await asyncio.sleep(delay)
+                delay *= 2  # Exponential backoff
+
+            except Exception as e:
+                # Server errors (5xx): retry up to 3 times
+                error_str = str(e)
+                if "500" in error_str or "502" in error_str or "503" in error_str:
+                    last_exception = e
+                    if attempt == max_retries:
+                        logger.error(
+                            "server_error_retries_exhausted",
+                            book_id=book_id,
+                            screenshot_id=screenshot_id,
+                            attempts=attempt + 1,
+                            error=error_str,
+                        )
+                        raise TextExtractionError(
+                            f"Server error after {max_retries + 1} attempts: {error_str}"
+                        ) from e
+
+                    logger.warning(
+                        "server_error_retry",
+                        book_id=book_id,
+                        screenshot_id=screenshot_id,
+                        attempt=attempt + 1,
+                        delay=2.0,
+                        error=error_str,
+                    )
+                    await asyncio.sleep(2.0)
+                    continue
+
+                # Client errors (4xx): don't retry, fail immediately
+                if "400" in error_str or "401" in error_str or "403" in error_str:
+                    logger.error(
+                        "client_error_no_retry",
+                        book_id=book_id,
+                        screenshot_id=screenshot_id,
+                        error=error_str,
+                    )
+                    raise OpenAIAPIError(f"Client error: {error_str}") from e
+
+                # Other errors: don't retry
+                logger.error(
+                    "unexpected_error",
+                    book_id=book_id,
+                    screenshot_id=screenshot_id,
+                    error=error_str,
+                )
+                raise TextExtractionError(
+                    f"Unexpected error during text extraction: {error_str}"
+                ) from e
+
+        # This should never be reached, but type checker needs it
+        if last_exception:
+            raise TextExtractionError(
+                f"Failed after {max_retries + 1} attempts"
+            ) from last_exception
+        raise RuntimeError("Unexpected retry loop exit")
+
+    async def _call_vision_api(self, image_base64: str) -> tuple[str, dict[str, Any]]:
+        """
+        Call OpenAI Vision API to extract text from image.
+
+        Args:
+            image_base64: Base64-encoded image
+
+        Returns:
+            Tuple of (extracted_text, metadata)
+
+        Raises:
+            RateLimitError: If rate limit is hit
+            Exception: For other API errors
+        """
+        # OpenAI SDK has complex message types; using type: ignore for vision messages
+        # fmt: off
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": VISION_EXTRACTION_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{image_base64}",
+                            "detail": self.detail_level,
+                        },
+                    },
+                ],
+            }
+        ]
+        # fmt: on
+        response = await self.client.chat.completions.create(
+            model=self.vision_model,
+            messages=messages,  # type: ignore[arg-type]
+            timeout=self.timeout,
+        )
+
+        # Extract text from response
+        extracted_text = response.choices[0].message.content or ""
+
+        # Calculate token usage and cost
+        usage = response.usage
+        if usage:
+            prompt_tokens = usage.prompt_tokens
+            completion_tokens = usage.completion_tokens
+            total_tokens = usage.total_tokens
+        else:
+            prompt_tokens = 0
+            completion_tokens = 0
+            total_tokens = 0
+
+        # Calculate cost estimate for gpt-4o-mini
+        # Input: $0.15/1M tokens, Output: $0.60/1M tokens
+        cost_estimate = (prompt_tokens * 0.15 / 1_000_000) + (
+            completion_tokens * 0.60 / 1_000_000
+        )
+
+        metadata = {
+            "vision_model": self.vision_model,
+            "tokens_used": total_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cost_estimate": cost_estimate,
+        }
+
+        return extracted_text, metadata

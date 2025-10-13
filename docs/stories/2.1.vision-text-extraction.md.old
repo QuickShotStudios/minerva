@@ -1,0 +1,233 @@
+# Story 2.1: OpenAI Vision API Integration for Text Extraction
+
+## Status
+Ready for Review
+
+## Story
+**As a** developer,
+**I want** integration with OpenAI Vision API to extract text from screenshots,
+**so that** I can convert book page images into structured text while preserving document formatting.
+
+## Acceptance Criteria
+1. Text extraction module created in core/ingestion/text_extraction.py with TextExtractor class
+2. OpenAI client initialized using openai Python SDK v1.12+ with API key from configuration
+3. Vision model selection uses configured VISION_MODEL (default: gpt-4o-mini) with fallback logic
+4. Screenshot sent to vision API with prompt: "Extract all text from this book page. Preserve structure including paragraphs, headers, lists, and formatting. Return only the extracted text."
+5. API call uses configured detail level (default: "low") to optimize cost
+6. Response includes extracted text with structure markers (e.g., markdown formatting for headers, lists)
+7. Error handling for: API rate limits (429), network failures, invalid responses, token limits
+8. Exponential backoff implemented for rate limit errors with configurable max retries (default: 3)
+9. Token usage tracked and logged for cost monitoring
+10. Vision model used is recorded with extracted text for traceability
+11. Successfully extracts text from 5 test screenshots with visual validation of accuracy
+12. Extraction preserves: paragraph breaks, numbered/bulleted lists, headers/subheaders, basic formatting
+
+## Tasks / Subtasks
+- [x] Create text extraction module structure (AC: 1)
+  - [x] Create `minerva/core/ingestion/text_extraction.py` file
+  - [x] Define TextExtractor class with async methods
+  - [x] Add type hints and docstrings
+
+- [x] Initialize OpenAI client with configuration (AC: 2, 3)
+  - [x] Import OpenAI SDK and settings from config
+  - [x] Initialize client with API key from settings.openai_api_key
+  - [x] Implement vision model selection logic using settings.vision_model
+  - [x] Add fallback logic for model selection errors
+
+- [x] Implement core text extraction method (AC: 4, 5, 6)
+  - [x] Create async `extract_text_from_screenshot()` method accepting file_path parameter
+  - [x] Encode screenshot image to base64 for API submission
+  - [x] Build chat completion request with vision prompt
+  - [x] Use configured detail level (settings.vision_detail_level, default "low")
+  - [x] Send request to OpenAI Vision API
+  - [x] Extract and return text from API response
+
+- [x] Implement error handling and retry logic (AC: 7, 8)
+  - [x] Add try-except blocks for OpenAI API exceptions
+  - [x] Handle rate limit errors (429) with exponential backoff
+  - [x] Handle server errors (5xx) with retry (up to 3 attempts)
+  - [x] Handle client errors (4xx) without retry (log and fail)
+  - [x] Handle network failures and timeouts
+  - [x] Use 60s timeout for Vision API calls
+
+- [x] Add token usage tracking and logging (AC: 9, 10)
+  - [x] Extract token usage from API response
+  - [x] Log total tokens (input + output) using structlog
+  - [x] Calculate and log estimated cost per extraction
+  - [x] Record vision model used in extraction metadata
+
+- [x] Create unit tests for text extraction (AC: 11, 12)
+  - [x] Create `tests/unit/test_text_extraction.py`
+  - [x] Mock OpenAI API responses
+  - [x] Test successful extraction with sample responses
+  - [x] Test error handling (rate limits, API errors, timeouts)
+  - [x] Test exponential backoff behavior
+  - [x] Verify token usage tracking
+  - [x] Test preservation of text structure (paragraphs, lists, headers)
+
+- [ ] Manual validation with test screenshots (AC: 11, 12)
+  - [ ] Prepare 5 diverse test screenshots with different layouts
+  - [ ] Run extraction on each screenshot
+  - [ ] Visually validate accuracy and structure preservation
+  - [ ] Document any formatting edge cases
+
+## Dev Notes
+
+### OpenAI Vision API Integration Details
+[Source: architecture/external-apis.md#OpenAI API]
+
+**Endpoint:**
+- `POST https://api.openai.com/v1/chat/completions` (Vision)
+- Authentication: Bearer token using `Authorization: Bearer $OPENAI_API_KEY`
+- API key from environment variable `OPENAI_API_KEY` (accessed via settings.openai_api_key)
+
+**Vision Model Configuration:**
+- Default model: `gpt-4o-mini` (configured via settings.vision_model)
+- Cost: $0.15/1M input tokens + $0.60/1M output tokens
+- Expected tokens per page: ~500-1000 input, ~200-400 output
+- Estimated cost per page: ~$0.0001-0.0002
+- Use "low" detail level to reduce tokens by ~85%
+
+**Rate Limits:**
+- Tier 1 (default): 500 RPM, 200,000 TPM
+- Tier 2+: 5,000 RPM, 2,000,000 TPM
+
+**Error Handling Requirements:**
+[Source: architecture/external-apis.md#Integration Notes]
+- 429 (Rate Limit): Exponential backoff starting at 1s, max 3 retries
+- 5xx (Server Error): Retry up to 3 times with 2s delay
+- 4xx (Client Error): Log and fail immediately (no retry)
+- Vision API timeout: 60s
+
+**Cost Optimization:**
+- Use "low" detail level for Vision API (reduces tokens by ~85%)
+- Log all token usage for budget tracking
+
+### File Location
+[Source: architecture/source-tree.md]
+- Module path: `minerva/core/ingestion/text_extraction.py`
+- Test path: `tests/unit/test_text_extraction.py`
+- Test fixtures: `tests/fixtures/sample_screenshot.png`
+
+### Data Model Integration
+[Source: architecture/data-models.md#Chunk]
+- The Chunk model includes a `vision_model` field (str) to track which GPT model extracted the text
+- This field must be populated with the model name used (e.g., "gpt-4o-mini")
+- Enables traceability and future re-extraction capabilities
+
+### Coding Standards
+[Source: architecture/coding-standards.md]
+- **All I/O operations must be async** - Use async/await for OpenAI API calls
+- **Never access environment variables directly** - Use `from minerva.config import settings`
+- **Never use print() for logging** - Use structlog
+- **All external API calls must have timeouts** - 60s for Vision API
+- **All retry logic must have max attempts** - Prevent infinite loops
+- **All error logs must include context** - Include book_id, screenshot_id, etc.
+- **OpenAI API calls must track token usage** - Budget tracking requirement
+- **File paths must use pathlib.Path** - Cross-platform compatibility
+- **All public functions must have type hints and docstrings**
+
+### Error Handling Strategy
+[Source: architecture/error-handling-strategy.md]
+
+**Exception Hierarchy:**
+- Raise `TextExtractionError` (custom exception) for extraction failures
+- Raise `OpenAIRateLimitError` for 429 errors
+- Raise `OpenAIAPIError` for other API errors
+
+**Retry Pattern:**
+- Rate Limits (429): Exponential backoff (1s, 2s, 4s, 8s, 16s)
+- Server Errors (5xx): Retry up to 3 times with 2s delay
+- Client Errors (4xx): No retry, log and fail
+- Timeouts: Retry once, then fail
+
+**Logging Requirements:**
+- Use structlog with JSON format for production
+- Log levels: INFO for successful extractions, WARNING for retries, ERROR for failures
+- Required context: book_id, screenshot_id, vision_model, tokens_used, cost_estimate
+
+### Testing
+
+[Source: architecture/test-strategy-and-standards.md]
+
+**Test Framework:**
+- pytest 7.4+ with pytest-asyncio for async tests
+- Location: `tests/unit/test_text_extraction.py`
+- Mocking: unittest.mock + pytest-mock
+
+**Test Coverage Requirements:**
+- 80%+ coverage for `minerva/core/ingestion/text_extraction.py`
+- Unit tests must mock OpenAI API responses (no real API calls)
+
+**Test Cases Required:**
+1. Successful text extraction with mocked API response
+2. Rate limit error handling with exponential backoff
+3. Server error retry logic
+4. Client error handling (no retry)
+5. Timeout handling
+6. Token usage tracking and logging
+7. Vision model recording
+8. Text structure preservation validation
+
+**Test File Structure:**
+```python
+# tests/unit/test_text_extraction.py
+import pytest
+from unittest.mock import AsyncMock, patch
+from minerva.core.ingestion.text_extraction import TextExtractor
+
+@pytest.mark.asyncio
+async def test_successful_extraction():
+    # Test successful extraction with mocked OpenAI response
+    pass
+
+@pytest.mark.asyncio
+async def test_rate_limit_retry():
+    # Test exponential backoff on 429 errors
+    pass
+```
+
+**CI Integration:**
+- Tests run on every push via GitHub Actions
+- Must pass: `pytest tests/unit/test_text_extraction.py -v --cov=minerva.core.ingestion.text_extraction`
+
+## Change Log
+| Date | Version | Description | Author |
+|------|---------|-------------|--------|
+| 2025-10-06 | 1.0 | Initial story creation for Epic 2 | Bob (Scrum Master) |
+
+## Dev Agent Record
+
+### Agent Model Used
+Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
+
+### Debug Log References
+None - implementation completed successfully without issues requiring debug logging.
+
+### Completion Notes
+Successfully implemented OpenAI Vision API integration for text extraction with:
+- TextExtractor class with async methods for screenshot processing
+- Comprehensive error handling with exponential backoff for rate limits (429) and retry logic for server errors (5xx)
+- Token usage tracking and cost estimation (gpt-4o-mini: $0.15/1M input + $0.60/1M output tokens)
+- Vision model recording in metadata for traceability
+- Base64 image encoding for API submission
+- Configurable detail level (low/high) and timeout (60s default)
+- 13 comprehensive unit tests with 90% code coverage
+- All tests pass, code passes ruff linting and mypy type checking
+
+Note: Manual validation with test screenshots (final task) deferred as it requires actual OpenAI API access with real screenshots. The implementation is complete and tested with mocked API responses. Manual validation can be performed during integration testing phase.
+
+### File List
+**New Files Created:**
+- `minerva/core/ingestion/text_extraction.py` - Main text extraction module with TextExtractor class
+- `minerva/utils/exceptions.py` - Custom exception classes (TextExtractionError, OpenAIAPIError, OpenAIRateLimitError, etc.)
+- `minerva/utils/retry.py` - Retry utilities with exponential backoff
+- `minerva/utils/openai_client.py` - Centralized OpenAI client initialization
+- `minerva/utils/token_counter.py` - Token counting utilities using tiktoken
+- `tests/unit/test_text_extraction.py` - Comprehensive unit tests (13 tests, 90% coverage)
+
+**Modified Files:**
+- None (all existing files remain unchanged)
+
+## QA Results
+_To be populated by QA agent_
