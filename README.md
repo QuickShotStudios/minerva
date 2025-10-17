@@ -1032,5 +1032,17 @@ MIT License - see LICENSE file for details
 - **Email:** your-email@example.com
 
 ---
+REAL Examples
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0F69LJVGV&ref_=kwl_kr_iv_rec_3' --use-ai-formatting --rewind-presses 10 --page-delay-min 10 --page-delay-max 20 --title "THE COMPLETE GUIDE TO PEPTIDES: UNLOCKING THE SECRETS TO HEALTH, HEALING, AND LONGEVITY" --author "Hack Smith"
+
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0FTVQDYMD&ref_=kwl_kr_iv_rec_2' --use-ai-formatting --rewind-presses 10 --page-delay-min 10 --page-delay-max 20 --title "Peptide Protocols Simplified: Ultimate Guide to Fat Loss, Muscle Growth, Better Brain Health, and Longevity—Featuring Clear Dosing, Sourcing Tips, and 200+ Science-Backed Stacks That Actually Work" --author "Earthwise Living"
+
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0FDHBD1B7&ref_=kwl_kr_iv_rec_1' --use-ai-formatting --rewind-presses 15 --page-delay-min 10 --page-delay-max 20 --title "Peptides Made Simple: Reconstitution Encyclopedia" --author "Matthew Farrahi"
+
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0D324DGSL&ref_=kwl_kr_iv_aqd_des_6' --use-ai-formatting --rewind-presses 15 --page-delay-min 10 --page-delay-max 20 --title "Peptides Made Simple: Usage, Dosing, Cycling & More" --author "Matthew Farrahi"
+
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0FG3JWH5Y&ref_=kwl_kr_iv_aqd_des_5' --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 --title "Peptides for Beginners: The Easy Guide to Peptide Therapy for Muscle Growth, Fat Loss, Brain Boost, Anti-Aging and Longevity" --author "Wellness, VitalEdge"
+
+---
 
 Built with ❤️ for researchers and knowledge workers
