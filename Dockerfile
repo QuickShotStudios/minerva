@@ -29,6 +29,7 @@ COPY alembic.ini ./
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV LOG_LEVEL=INFO
+ENV PYTHONPATH=/app
 
 # Expose port (Railway will set PORT env var)
 EXPOSE 8000
@@ -37,6 +38,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
-# Run migrations and start API
+# Start API server
 # Use shell form to allow environment variable expansion
-CMD alembic upgrade head && uvicorn minerva.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Note: Migrations are handled by fly.toml release_command
+CMD uvicorn minerva.main:app --host 0.0.0.0 --port ${PORT:-8000}

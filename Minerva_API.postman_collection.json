@@ -1,0 +1,154 @@
+{
+  "info": {
+    "name": "Minerva API - Local",
+    "description": "Minerva knowledge base API for peptide research",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "value",
+        "value": "{{API_KEY}}",
+        "type": "string"
+      },
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/health",
+          "host": ["{{BASE_URL}}"],
+          "path": ["health"]
+        },
+        "description": "Public health check endpoint (no authentication required)"
+      }
+    },
+    {
+      "name": "Semantic Search",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"peptides for muscle growth\",\n  \"top_k\": 5,\n  \"similarity_threshold\": 0.5,\n  \"include_context\": false\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/search/semantic",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "search", "semantic"]
+        },
+        "description": "Search knowledge base using natural language query"
+      }
+    },
+    {
+      "name": "List Books",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/books?limit=20&offset=0",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "books"],
+          "query": [
+            {
+              "key": "limit",
+              "value": "20"
+            },
+            {
+              "key": "offset",
+              "value": "0"
+            },
+            {
+              "key": "status",
+              "value": "completed",
+              "disabled": true
+            }
+          ]
+        },
+        "description": "Get paginated list of books in knowledge base"
+      }
+    },
+    {
+      "name": "Get Book Details",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/books/{{BOOK_ID}}",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "books", "{{BOOK_ID}}"]
+        },
+        "description": "Get detailed information about a specific book"
+      }
+    },
+    {
+      "name": "Get Chunk Details",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/api/v1/chunks/{{CHUNK_ID}}",
+          "host": ["{{BASE_URL}}"],
+          "path": ["api", "v1", "chunks", "{{CHUNK_ID}}"]
+        },
+        "description": "Get chunk with surrounding context"
+      }
+    },
+    {
+      "name": "API Documentation",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{BASE_URL}}/docs",
+          "host": ["{{BASE_URL}}"],
+          "path": ["docs"]
+        },
+        "description": "Open Swagger UI documentation in browser"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "API_KEY",
+      "value": "QpwOcBhDu2eJYtE0N3r_RDNJBgH4x7JDmnTVHNznjWk",
+      "type": "string"
+    },
+    {
+      "key": "BOOK_ID",
+      "value": "9cd7b678-76ba-4f23-9677-12cd94c3a548",
+      "type": "string"
+    },
+    {
+      "key": "CHUNK_ID",
+      "value": "33d1fc30-7642-499e-b997-6379d599420f",
+      "type": "string"
+    }
+  ]
+}

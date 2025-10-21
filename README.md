@@ -448,7 +448,7 @@ Powered by PostgreSQL pgvector:
 ### Base URL
 
 - **Local:** `http://localhost:8000`
-- **Production:** `https://your-domain.com`
+- **Production:** `https://minerva-api.fly.dev`
 
 ### Endpoints
 
@@ -575,66 +575,157 @@ poetry run uvicorn minerva.main:app --reload
 
 ## Production Deployment
 
-### Database Setup
+### Live Production API
+
+**URL:** https://minerva-api.fly.dev
+
+**Documentation:** https://minerva-api.fly.dev/docs
+
+**Status:** ✅ Deployed and operational
+
+**Database:** Neon (serverless PostgreSQL with pgvector)
+
+**Hosting:** Fly.io with auto-scaling
+
+**Authentication:** API key required (X-API-Key header)
+
+### Quick Start with Production API
 
 ```bash
-# Create production database
-createdb minerva_production
+# Health check (no auth required)
+curl https://minerva-api.fly.dev/health
 
-# Update .env with production database
-DATABASE_URL=postgresql+asyncpg://postgres@localhost/minerva_production
+# Semantic search (requires API key)
+curl -X POST https://minerva-api.fly.dev/api/v1/search/semantic \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{
+    "query": "peptides for muscle growth",
+    "top_k": 5,
+    "similarity_threshold": 0.5
+  }'
 
-# Run migrations
-poetry run alembic upgrade head
+# List books (requires API key)
+curl https://minerva-api.fly.dev/api/v1/books \
+  -H "X-API-Key: YOUR_API_KEY"
 ```
 
-### Export and Import
+### Deploying Your Own Instance
+
+#### 1. Database Setup (Neon)
 
 ```bash
-# 1. Export from local
-poetry run minerva export <book_id> --output-dir exports/
-
-# 2. Validate export
-python scripts/validate_export.py exports/book_<uuid>.sql
-
-# 3. Backup production (if data exists)
-pg_dump $PRODUCTION_DATABASE_URL > backup_$(date +%Y%m%d).sql
-
-# 4. Import to production
-psql $PRODUCTION_DATABASE_URL -f exports/book_<uuid>.sql
-
-# 5. Verify import
-psql $PRODUCTION_DATABASE_URL -c \
-  "SELECT COUNT(*) FROM chunks WHERE book_id = '<uuid>'"
+# 1. Create Neon account at https://neon.tech
+# 2. Create a new project
+# 3. Enable pgvector extension:
+#    - Go to SQL Editor in Neon dashboard
+#    - Run: CREATE EXTENSION IF NOT EXISTS vector;
+# 4. Copy connection string (use pooled connection)
 ```
 
-### Docker Deployment
+#### 2. Export and Import Data
 
 ```bash
-# Build image
-docker build -t minerva-api .
+# Export from local database
+pg_dump -h localhost -U postgres -d mpp_minerva_local \
+  --schema-only > /tmp/minerva_schema.sql
 
-# Run container
-docker run -d \
-  -p 8000:8000 \
-  -e DATABASE_URL=$DATABASE_URL \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  -e ENVIRONMENT=production \
-  minerva-api
+pg_dump -h localhost -U postgres -d mpp_minerva_local \
+  -t embedding_configs --data-only > /tmp/minerva_embedding_configs.sql
+
+pg_dump -h localhost -U postgres -d mpp_minerva_local \
+  -t books -t chunks -t screenshots -t ingestion_logs \
+  --data-only > /tmp/minerva_data.sql
+
+# Import to Neon (update connection string with ?ssl=require for asyncpg)
+psql "postgresql://user:pass@host/db?ssl=require" -f /tmp/minerva_schema.sql
+psql "postgresql://user:pass@host/db?ssl=require" -f /tmp/minerva_embedding_configs.sql
+psql "postgresql://user:pass@host/db?ssl=require" -f /tmp/minerva_data.sql
+```
+
+#### 3. Deploy to Fly.io
+
+```bash
+# Install Fly CLI
+brew install flyctl
+
+# Login
+flyctl auth login
+
+# Create app
+flyctl apps create your-app-name --org your-org
+
+# Set secrets
+flyctl secrets set \
+  API_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(32))") \
+  DATABASE_URL="postgresql+asyncpg://user:pass@host/db?ssl=require" \
+  OPENAI_API_KEY=sk-... \
+  CORS_ALLOWED_ORIGINS='["https://yourdomain.com"]' \
+  -a your-app-name
+
+# Deploy (automatically runs migrations via fly.toml release_command)
+flyctl deploy
+```
+
+#### 4. Verify Deployment
+
+```bash
+# Check health
+curl https://your-app-name.fly.dev/health
+
+# Test search
+curl -X POST https://your-app-name.fly.dev/api/v1/search/semantic \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{"query": "test query", "top_k": 3}'
+
+# View logs
+flyctl logs -a your-app-name
+
+# Monitor app
+flyctl dashboard -a your-app-name
 ```
 
 ### Environment Variables (Production)
 
 ```bash
 # Required
-DATABASE_URL=postgresql://...
+API_KEY=<generate with: python -c "import secrets; print(secrets.token_urlsafe(32))">
+DATABASE_URL=postgresql+asyncpg://user:pass@host/db?ssl=require
 OPENAI_API_KEY=sk-...
 ENVIRONMENT=production
 
 # Optional
 LOG_LEVEL=INFO
-CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+CORS_ALLOWED_ORIGINS=["https://yourdomain.com","https://app.yourdomain.com"]
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+FILTER_KINDLE_UI=true
 ```
+
+### Architecture Notes
+
+**Local Environment:**
+- Playwright automation for book capture
+- Tesseract OCR for text extraction
+- PostgreSQL with pgvector for local storage
+- CLI for ingestion and processing
+
+**Production Environment:**
+- Fly.io hosting with auto-scaling (scales to zero when idle)
+- Neon serverless PostgreSQL with pgvector
+- FastAPI read-only API
+- API key authentication
+- Auto-SSL/TLS
+
+**Data Flow:**
+1. Capture → Local ingestion (Playwright + Tesseract)
+2. Process → Local database (PostgreSQL + pgvector)
+3. Export → SQL dump
+4. Import → Production database (Neon)
+5. Serve → Production API (Fly.io)
+
+For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Architecture
 

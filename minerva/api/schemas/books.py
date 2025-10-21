@@ -14,7 +14,7 @@ class BookListItem(BaseModel):
     author: str | None
     total_screenshots: int | None
     total_chunks: int
-    capture_date: datetime
+    capture_date: datetime | None
     ingestion_status: str
 
 
@@ -65,7 +65,7 @@ class BookDetail(BaseModel):
     kindle_url: str
     total_screenshots: int | None
     total_chunks: int
-    capture_date: datetime
+    capture_date: datetime | None
     ingestion_status: str
     ingestion_error: str | None
     metadata: dict | None  # type: ignore[type-arg]

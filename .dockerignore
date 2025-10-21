@@ -49,6 +49,10 @@ docs/
 *.md
 !README.md
 
+# Deployment configuration (used by flyctl, not in container)
+fly.toml
+.claude/
+
 # Poetry virtual environments
 .venv/
 venv/

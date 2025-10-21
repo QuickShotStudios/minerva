@@ -1,0 +1,57 @@
+# Fly.io configuration for Minerva API
+# See https://fly.io/docs/reference/configuration/ for documentation
+
+app = "minerva-api"
+primary_region = "ord"  # Chicago
+
+# Organization
+[org]
+  org = "quickshot-studios-llc"
+
+# Build configuration
+[build]
+
+# HTTP service configuration
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0  # Scale to zero when not in use
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# VM configuration
+[[vm]]
+  memory = "1gb"  # Adjust based on your needs (512mb, 1gb, 2gb, etc.)
+  cpu_kind = "shared"
+  cpus = 1
+
+# Environment variables (non-sensitive)
+[env]
+  ENVIRONMENT = "production"
+  LOG_LEVEL = "INFO"
+  EMBEDDING_MODEL = "text-embedding-3-small"
+  EMBEDDING_DIMENSIONS = "1536"
+  FILTER_KINDLE_UI = "true"
+
+# Secrets (set via: fly secrets set KEY=value)
+# Required secrets:
+#   - API_KEY: API key for authenticating requests (generate with: python -c "import secrets; print(secrets.token_urlsafe(32))")
+#   - DATABASE_URL: PostgreSQL connection string (auto-set if using Fly Postgres with `flyctl postgres attach`)
+#   - OPENAI_API_KEY: OpenAI API key for embeddings
+#   - CORS_ALLOWED_ORIGINS: Comma-separated list of allowed origins (e.g., https://yourdomain.com,https://app.yourdomain.com)
+#
+# Optional secrets:
+#   - REQUIRE_API_KEY: Set to "false" to disable authentication (default: true, not recommended for production)
+
+# Deploy configuration
+[deploy]
+  release_command = "alembic upgrade head"  # Run migrations on deploy
+  strategy = "rolling"  # Rolling deployment for zero downtime

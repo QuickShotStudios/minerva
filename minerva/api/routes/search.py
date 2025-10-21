@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from minerva.api.dependencies import get_db
+from minerva.api.security import verify_api_key
 from minerva.api.schemas.search import (
     BookSummary,
     ContextChunk,
@@ -28,6 +29,7 @@ router = APIRouter(prefix="/search", tags=["search"])
     description="Search knowledge base using natural language query with vector similarity",
     responses={
         200: {"description": "Successful search with results"},
+        401: {"description": "Unauthorized (invalid or missing API key)"},
         422: {"description": "Validation error (invalid parameters)"},
         500: {"description": "Internal server error"},
         503: {"description": "Service unavailable (database or embedding service down)"},
@@ -36,12 +38,15 @@ router = APIRouter(prefix="/search", tags=["search"])
 async def semantic_search(
     request: SearchRequest,
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    _: None = Depends(verify_api_key),  # noqa: B008
 ) -> SearchResponse:
     """
     Execute semantic search query against knowledge base.
 
     Returns up to top_k chunks ranked by similarity score, optionally filtered
     by book IDs or date range. Supports context windows for expanded results.
+
+    **Authentication:** Requires valid API key in X-API-Key header.
 
     Args:
         request: Search request with query text and optional filters
@@ -51,8 +56,8 @@ async def semantic_search(
         SearchResponse with results and query metadata
 
     Raises:
-        HTTPException: 422 for validation errors, 503 for service unavailable,
-                      500 for internal errors
+        HTTPException: 401 for invalid/missing API key, 422 for validation errors,
+                      503 for service unavailable, 500 for internal errors
     """
     logger.info(
         "semantic_search_request",

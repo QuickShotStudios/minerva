@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from minerva.api.dependencies import get_db
+from minerva.api.security import verify_api_key
 from minerva.api.schemas.books import (
     BookDetail,
     BookListItem,
@@ -36,6 +37,7 @@ async def list_books(
         None, alias="status", description="Filter by ingestion_status"
     ),
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    _: None = Depends(verify_api_key),  # noqa: B008
 ) -> BooksListResponse:
     """
     List books with pagination and optional status filtering.
@@ -126,6 +128,7 @@ async def list_books(
 async def get_book(
     book_id: UUID,
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    _: None = Depends(verify_api_key),  # noqa: B008
 ) -> BookDetail:
     """
     Get detailed information about a specific book.

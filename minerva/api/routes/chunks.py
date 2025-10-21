@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from minerva.api.dependencies import get_db
+from minerva.api.security import verify_api_key
 from minerva.api.schemas.books import BookListItem, ChunkContext, ChunkDetail
 from minerva.db.models.book import Book
 from minerva.db.models.chunk import Chunk
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/chunks", tags=["chunks"])
 async def get_chunk(
     chunk_id: UUID,
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    _: None = Depends(verify_api_key),  # noqa: B008
 ) -> ChunkDetail:
     """
     Get detailed information about a specific chunk with context.

@@ -77,6 +77,16 @@ class Settings(BaseSettings):
         description="Allowed CORS origins for API requests",
     )
 
+    # API Security settings
+    api_key: SecretStr | None = Field(
+        default=None,
+        description="Primary API key for authentication (required in production)",
+    )
+    require_api_key: bool = Field(
+        default=True,
+        description="Require API key authentication for protected endpoints",
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -126,6 +136,20 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"Cannot create screenshots directory at {self.screenshots_dir}: {e}"
             ) from e
+        return self
+
+    @model_validator(mode="after")
+    def validate_api_key(self) -> "Settings":
+        """Validate API key is set when required in production."""
+        if (
+            self.require_api_key
+            and self.environment == "production"
+            and not self.api_key
+        ):
+            raise ValueError(
+                "API_KEY must be set when REQUIRE_API_KEY=true in production environment. "
+                "Set API_KEY environment variable or set REQUIRE_API_KEY=false."
+            )
         return self
 
 
