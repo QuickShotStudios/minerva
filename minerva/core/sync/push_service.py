@@ -269,7 +269,7 @@ async def generate_push_sql(book_id: UUID, session: AsyncSession) -> str:
     sql_lines.append("-- Book Record")
     sql_lines.append(
         "INSERT INTO books (id, title, author, kindle_url, total_screenshots, "
-        "capture_date, ingestion_status, metadata, created_at, updated_at)"
+        "capture_date, ingestion_status, book_metadata, created_at, updated_at)"
     )
 
     # Escape single quotes in text fields
@@ -299,76 +299,34 @@ async def generate_push_sql(book_id: UUID, session: AsyncSession) -> str:
     )
     sql_lines.append("")
 
-    # Screenshots
-    if screenshots:
-        sql_lines.append("-- Screenshots (metadata only, file_path = NULL)")
-        for screenshot in screenshots:
-            screenshot_hash = screenshot.screenshot_hash.replace("'", "''") if screenshot.screenshot_hash else None
-            hash_sql = "NULL" if screenshot_hash is None else f"'{screenshot_hash}'"
+    # Skip screenshots for production (not needed for search, would require file_path)
+    # Production only needs chunks with embeddings for semantic search
 
-            sql_lines.append(
-                f"INSERT INTO screenshots (id, book_id, sequence_number, file_path, "
-                f"screenshot_hash, captured_at)"
-            )
-            sql_lines.append(
-                f"VALUES ('{screenshot.id}', '{screenshot.book_id}', {screenshot.sequence_number}, "
-                f"NULL, {hash_sql}, '{screenshot.captured_at.isoformat()}')"
-            )
-            sql_lines.append("ON CONFLICT (id) DO NOTHING;")
-        sql_lines.append("")
-
-    # Chunks
+    # Chunks - store for parameterized execution
+    chunks_data = []
     if chunks:
-        sql_lines.append("-- Text Chunks with Embeddings")
         for chunk in chunks:
-            chunk_text = chunk.chunk_text.replace("'", "''")
-
-            # Format screenshot_ids array
-            screenshot_ids_str = (
-                "'{" + ",".join(str(sid) for sid in chunk.screenshot_ids) + "}'"
-                if chunk.screenshot_ids
-                else "NULL"
-            )
-
-            # Format embedding vector
-            embedding_str = (
-                "'[" + ",".join(str(e) for e in chunk.embedding) + "]'"
-                if chunk.embedding
-                else "NULL"
-            )
-
-            chunk_metadata = json.dumps(chunk.chunk_metadata) if chunk.chunk_metadata else "NULL"
-            if chunk_metadata != "NULL":
-                chunk_metadata = "'" + chunk_metadata.replace("'", "''") + "'"
-
-            vision_model = chunk.vision_model.replace("'", "''") if chunk.vision_model else None
-
-            embedding_config_sql = "NULL" if chunk.embedding_config_id is None else f"'{chunk.embedding_config_id}'"
-            vision_model_sql = "NULL" if vision_model is None else f"'{vision_model}'"
-            extraction_ts_sql = "NULL" if chunk.extraction_timestamp is None else f"'{chunk.extraction_timestamp.isoformat()}'"
-            prompt_tokens_sql = "NULL" if chunk.vision_prompt_tokens is None else str(chunk.vision_prompt_tokens)
-            completion_tokens_sql = "NULL" if chunk.vision_completion_tokens is None else str(chunk.vision_completion_tokens)
-
-            sql_lines.append(
-                f"INSERT INTO chunks (id, book_id, screenshot_ids, chunk_sequence, chunk_text, "
-                f"chunk_token_count, embedding_config_id, embedding, vision_model, "
-                f"vision_prompt_tokens, vision_completion_tokens, extraction_timestamp, "
-                f"chunk_metadata, created_at)"
-            )
-            sql_lines.append(
-                f"VALUES ('{chunk.id}', '{chunk.book_id}', {screenshot_ids_str}, "
-                f"{chunk.chunk_sequence}, '{chunk_text}', {chunk.chunk_token_count}, "
-                f"{embedding_config_sql}, {embedding_str}, {vision_model_sql}, "
-                f"{prompt_tokens_sql}, {completion_tokens_sql}, {extraction_ts_sql}, "
-                f"{chunk_metadata}, '{chunk.created_at.isoformat()}')"
-            )
-            sql_lines.append("ON CONFLICT (id) DO NOTHING;")
-        sql_lines.append("")
+            chunks_data.append({
+                "id": chunk.id,
+                "book_id": chunk.book_id,
+                "screenshot_ids": list(chunk.screenshot_ids) if chunk.screenshot_ids else None,
+                "chunk_sequence": chunk.chunk_sequence,
+                "chunk_text": chunk.chunk_text,  # Will be parameterized
+                "chunk_token_count": chunk.chunk_token_count,
+                "embedding_config_id": chunk.embedding_config_id,
+                "embedding": list(chunk.embedding) if chunk.embedding is not None else None,
+                "vision_model": chunk.vision_model,
+                "vision_prompt_tokens": chunk.vision_prompt_tokens,
+                "vision_completion_tokens": chunk.vision_completion_tokens,
+                "extraction_timestamp": chunk.extraction_timestamp,
+                "chunk_metadata": chunk.chunk_metadata,
+                "created_at": chunk.created_at,
+            })
 
     # Commit
     sql_lines.append("COMMIT;")
 
-    return "\n".join(sql_lines)
+    return "\n".join(sql_lines), chunks_data
 
 
 async def push_book_to_production(
@@ -413,8 +371,8 @@ async def push_book_to_production(
             "production_book": prod_book,
         }
 
-    # Generate SQL
-    sql = await generate_push_sql(book_id, local_session)
+    # Generate SQL and get chunks data
+    sql, chunks_data = await generate_push_sql(book_id, local_session)
 
     # Execute SQL against production database
     engine = create_async_engine(settings.production_database_url, echo=False)
@@ -422,8 +380,33 @@ async def push_book_to_production(
 
     try:
         async with async_session() as session:
-            # Execute SQL (already wrapped in transaction)
-            await session.execute(text(sql))
+            # Split SQL into individual statements (asyncpg doesn't support multiple statements)
+            # Remove comments and empty lines
+            statements = []
+            for line in sql.split('\n'):
+                line = line.strip()
+                # Skip comments and empty lines
+                if not line or line.startswith('--'):
+                    continue
+                # Skip BEGIN and COMMIT (we use SQLAlchemy's transaction)
+                if line in ('BEGIN;', 'COMMIT;'):
+                    continue
+                statements.append(line)
+
+            # Join statements and split by semicolon
+            full_sql = ' '.join(statements)
+            individual_statements = [s.strip() for s in full_sql.split(';') if s.strip()]
+
+            # Execute each statement within the transaction
+            for stmt in individual_statements:
+                await session.execute(text(stmt))
+
+            # Insert chunks using ORM to avoid escaping issues
+            if chunks_data:
+                for chunk_dict in chunks_data:
+                    chunk = Chunk(**chunk_dict)
+                    session.add(chunk)
+
             await session.commit()
 
             logger.info(

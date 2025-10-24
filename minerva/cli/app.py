@@ -681,6 +681,7 @@ def list(
                     return
 
                 table = Table(title=f"📚 Production Books ({len(books)} total)")
+                table.add_column("Book ID", style="dim", no_wrap=True)
                 table.add_column("Title", style="cyan", no_wrap=False, max_width=40)
                 table.add_column("Author", style="white", max_width=25)
                 table.add_column("Status", style="green")
@@ -693,6 +694,7 @@ def list(
 
                     status_style = "green" if book.ingestion_status == "completed" else "yellow"
                     table.add_row(
+                        str(book.id),
                         book.title,
                         book.author or "N/A",
                         f"[{status_style}]{book.ingestion_status}[/{status_style}]",
@@ -732,6 +734,7 @@ def list(
                     return
 
                 table = Table(title=f"📚 Local Books ({len(rows)} total)")
+                table.add_column("Book ID", style="dim", no_wrap=True)
                 table.add_column("Title", style="cyan", no_wrap=False, max_width=40)
                 table.add_column("Author", style="white", max_width=25)
                 table.add_column("Status", style="green")
@@ -743,6 +746,7 @@ def list(
 
                     status_style = "green" if book.ingestion_status == "completed" else "yellow"
                     table.add_row(
+                        str(book.id),
                         book.title,
                         book.author or "N/A",
                         f"[{status_style}]{book.ingestion_status}[/{status_style}]",
