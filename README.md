@@ -18,6 +18,8 @@ Minerva automates knowledge extraction from Kindle Cloud Reader books into a sea
 - 🔐 **Session Management** - Multi-service authentication with easy account switching
 - ⚙️ **Configurable Navigation** - Adjustable page delays and rewind behavior
 - 💬 **Interactive Book-End Detection** - User confirmation for capture completion
+- 🌐 **Multi-Computer Sync** - Push books to production database from any computer
+- 👻 **Headless Mode** - Run browser automation without GUI for server deployment
 - 📤 **Production Export** - Safe SQL exports for deployment
 - 🚀 **FastAPI Server** - RESTful API for semantic search
 
@@ -311,12 +313,118 @@ When Minerva detects a possible book end (e.g., disabled "Next Page" button), it
 
 #### Authentication & Sessions
 
+**One-time Authentication:**
+
+Before using headless mode, authenticate once with a visible browser:
+
+```bash
+# Authenticate with Kindle Cloud Reader (opens browser)
+poetry run minerva auth
+
+# Or authenticate with specific service (future: audible, pubmed, etc.)
+poetry run minerva auth kindle
+```
+
+This opens a visible browser window where you can log in to Amazon. Once authenticated, the session is saved to `~/.minerva/sessions/kindle.json` and can be reused for all future ingestions.
+
+**Switching Accounts:**
+
 ```bash
 # Force new authentication (switch accounts)
 poetry run minerva ingest <kindle_url> --force-auth
 
+# Or clear session first
+poetry run minerva session clear kindle
+poetry run minerva auth
+```
+
+**Other Options:**
+
+```bash
 # Screenshots only (skip OCR and embeddings)
 poetry run minerva ingest <kindle_url> --screenshots-only
+```
+
+#### Headless Mode
+
+Run browser automation without a visible GUI window. Perfect for:
+- Server environments without a display
+- Automated batch processing
+- Background ingestion tasks
+- CI/CD pipelines
+
+**Requirements:**
+- Must have an existing authenticated session (run `minerva auth` first)
+- Amazon login will NOT work in headless mode
+
+**Workflow:**
+
+```bash
+# Step 1: Authenticate once (visible browser)
+poetry run minerva auth
+
+# Step 2: Ingest in headless mode (no GUI)
+poetry run minerva ingest <kindle_url> --headless
+
+# Step 3: Process multiple books in headless mode
+poetry run minerva ingest 'https://read.amazon.com/?asin=BOOK1' --headless --title "Book 1" --author "Author 1"
+poetry run minerva ingest 'https://read.amazon.com/?asin=BOOK2' --headless --title "Book 2" --author "Author 2"
+poetry run minerva ingest 'https://read.amazon.com/?asin=BOOK3' --headless --title "Book 3" --author "Author 3"
+```
+
+**Example: Batch Processing Script**
+
+```bash
+#!/bin/bash
+# batch_ingest.sh - Process multiple books in headless mode
+
+# Authenticate once (opens browser for login)
+poetry run minerva auth
+
+# Process books in headless mode (no browser windows)
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0F69LJVGV' \
+  --headless \
+  --title "Complete Guide to Peptides" \
+  --author "Hack Smith" \
+  --use-ai-formatting
+
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0FTVQDYMD' \
+  --headless \
+  --title "Peptide Protocols Simplified" \
+  --author "Earthwise Living" \
+  --use-ai-formatting
+
+echo "Batch processing complete!"
+```
+
+**Example: Server Deployment**
+
+```bash
+# On your server (SSH session)
+cd /path/to/minerva
+
+# First-time setup: authenticate (requires X11 forwarding or local session)
+poetry run minerva auth
+
+# Now you can run headless ingestion tasks
+poetry run minerva ingest <kindle_url> --headless --title "..." --author "..."
+
+# Or schedule with cron
+0 2 * * * cd /path/to/minerva && poetry run minerva ingest <url> --headless >> /var/log/minerva.log 2>&1
+```
+
+**Troubleshooting:**
+
+If you get authentication errors in headless mode:
+```bash
+# Check if session exists
+poetry run minerva session status kindle
+
+# If no session, authenticate first
+poetry run minerva auth
+
+# Then retry headless ingestion
+poetry run minerva ingest <kindle_url> --headless
 ```
 
 #### Complete Example
@@ -331,6 +439,90 @@ poetry run minerva ingest 'https://read.amazon.com/?asin=B08LZLYCXL' \
   --page-delay-min 5 \
   --page-delay-max 10
 ```
+
+### Multi-Computer Workflow
+
+When working on multiple computers, use these commands to sync your books with the production database:
+
+#### List Books
+
+```bash
+# List local books
+poetry run minerva list
+
+# List production books
+poetry run minerva list --production
+```
+
+Shows books with their status, chunk counts, and metadata. Useful for seeing what's already in production before pushing.
+
+#### Check Sync Status
+
+```bash
+# Compare local and production databases
+poetry run minerva sync-status
+```
+
+Shows four types of sync states:
+- **📍 Local Only** - Books you've ingested locally but not yet pushed to production
+- **🌐 Production Only** - Books ingested on other computers (available to pull in future)
+- **✅ Synced** - Books that match perfectly between local and production
+- **⚠️ Different** - Books with different chunk counts (needs investigation)
+
+Example output:
+```
+📊 Sync Status Summary
+  📍 Local Only: 2 books (need to push)
+  🌐 Production Only: 7 books (from other computers)
+  ✅ Synced: 0 books
+  ⚠️ Different: 0 books
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ Title                            ┃ Status      ┃ Local/Prod   ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ Peptide Protocols                │ 🌐 Prod Only│ -/42 chunks  │
+│ Complete Guide to Peptides       │ 📍 Local    │ 156/-        │
+└──────────────────────────────────┴─────────────┴──────────────┘
+```
+
+#### Push Books to Production
+
+```bash
+# Push a specific book (with confirmation)
+poetry run minerva push <book-id>
+
+# Skip confirmation prompt
+poetry run minerva push <book-id> --yes
+```
+
+Safely pushes a book from your local database to production. Features:
+- Validates book exists locally and is completed
+- Checks if book already exists in production
+- Prompts for confirmation before overwriting
+- Uses SQL transactions for safety
+- Handles conflicts with `ON CONFLICT` clauses
+
+**Workflow Example:**
+
+```bash
+# Step 1: See what you have locally
+poetry run minerva list
+
+# Step 2: Check what's already in production
+poetry run minerva sync-status
+
+# Step 3: Push your new book
+poetry run minerva push 3fa85f64-5717-4562-b3fc-2c963f66afa6
+
+# Minerva asks: "Book already exists in production. What would you like to do? [update/skip]"
+# Type 'update' to replace, or 'skip' to cancel
+```
+
+**Use Cases:**
+- **Home Computer**: Ingest books locally, push to production when done
+- **Work Computer**: Check sync-status, see books from home, no conflicts
+- **Laptop**: Same workflow - local ingestion, push to shared production DB
+- **Production**: All computers share the same knowledge base via API
 
 ### Session Management
 
@@ -1053,26 +1245,225 @@ poetry run minerva export <book-uuid>
 psql $PRODUCTION_DB -f exports/book_<uuid>.sql
 ```
 
+### Multi-Computer Workflow
+
+Working across multiple computers with a shared production database:
+
+**Scenario**: You have a home computer, work laptop, and server, all ingesting books into the same production database.
+
+```bash
+# === HOME COMPUTER ===
+
+# First time: Authenticate once
+poetry run minerva auth
+
+# Ingest books in headless mode
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0F69LJVGV' \
+  --headless \
+  --title "Complete Guide to Peptides" \
+  --author "Hack Smith" \
+  --use-ai-formatting
+
+# Check what you have locally
+poetry run minerva list
+
+# Check sync status with production
+poetry run minerva sync-status
+# Output: 📍 Local Only: 1 book (Complete Guide to Peptides)
+
+# Push to production (so work laptop can access it)
+poetry run minerva push <book-id>
+# Output: ✅ Successfully pushed book to production
+
+
+# === WORK LAPTOP ===
+
+# Authenticate once (different location)
+poetry run minerva auth
+
+# Check what's in production
+poetry run minerva list --production
+# Output: Shows "Complete Guide to Peptides" from home computer
+
+# Check sync status
+poetry run minerva sync-status
+# Output: 🌐 Production Only: 1 book (from other computers)
+
+# Ingest a new book locally
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0FTVQDYMD' \
+  --headless \
+  --title "Peptide Protocols Simplified" \
+  --author "Earthwise Living"
+
+# Push to production
+poetry run minerva sync-status
+# Output: 📍 Local Only: 1 book (Peptide Protocols Simplified)
+#         🌐 Production Only: 1 book (Complete Guide to Peptides)
+
+poetry run minerva push <book-id>
+
+
+# === SERVER (BATCH PROCESSING) ===
+
+# One-time auth setup (requires X11 forwarding or local session)
+poetry run minerva auth
+
+# Create batch processing script
+cat > batch_ingest.sh << 'EOF'
+#!/bin/bash
+# Process multiple books in headless mode
+
+BOOKS=(
+  "B0FDHBD1B7|Peptides Made Simple: Reconstitution|Matthew Farrahi"
+  "B0D324DGSL|Peptides Made Simple: Usage|Matthew Farrahi"
+  "B0FG3JWH5Y|Peptides for Beginners|VitalEdge Wellness"
+)
+
+for book in "${BOOKS[@]}"; do
+  IFS='|' read -r asin title author <<< "$book"
+
+  echo "Processing: $title"
+  poetry run minerva ingest "https://read.amazon.com/?asin=$asin" \
+    --headless \
+    --title "$title" \
+    --author "$author" \
+    --use-ai-formatting
+
+  # Get book ID from last ingestion
+  BOOK_ID=$(poetry run minerva list | grep "$title" | awk '{print $1}')
+
+  # Push to production
+  poetry run minerva push "$BOOK_ID" --yes
+
+  echo "Completed: $title"
+done
+
+echo "✅ All books processed and pushed to production"
+EOF
+
+chmod +x batch_ingest.sh
+./batch_ingest.sh
+
+
+# === BACK ON HOME COMPUTER ===
+
+# Check what's new in production
+poetry run minerva sync-status
+# Output: 🌐 Production Only: 4 books (from work laptop and server)
+
+# All computers now share the same knowledge base via API
+curl https://minerva-api.fly.dev/api/v1/books \
+  -H "X-API-Key: YOUR_API_KEY"
+# Output: 5 books total (1 from home, 1 from work, 3 from server)
+```
+
+**Benefits:**
+- ✅ Each computer has lightweight local database for ingestion
+- ✅ Production database serves as single source of truth
+- ✅ No conflicts - books are uniquely identified by ID
+- ✅ Can see what others have ingested via `sync-status`
+- ✅ API serves all books from all computers
+- ✅ Headless mode enables server automation
+
+### Headless + Batch Processing
+
+Combine headless mode with batch processing for efficient workflows:
+
+```bash
+#!/bin/bash
+# advanced_batch.sh - Process multiple books with error handling
+
+# Configure
+SESSION_CHECK=$(poetry run minerva session status kindle)
+if [[ $SESSION_CHECK != *"Active"* ]]; then
+  echo "❌ No active session. Run: poetry run minerva auth"
+  exit 1
+fi
+
+# Book list
+declare -a BOOKS=(
+  "B0F69LJVGV|Complete Guide to Peptides|Hack Smith"
+  "B0FTVQDYMD|Peptide Protocols Simplified|Earthwise Living"
+  "B0FDHBD1B7|Peptides Made Simple: Reconstitution|Matthew Farrahi"
+)
+
+# Process each book
+for book_data in "${BOOKS[@]}"; do
+  IFS='|' read -r asin title author <<< "$book_data"
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "📖 Processing: $title"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # Ingest with headless mode
+  poetry run minerva ingest "https://read.amazon.com/?asin=$asin" \
+    --headless \
+    --title "$title" \
+    --author "$author" \
+    --use-ai-formatting \
+    --page-delay-min 5 \
+    --page-delay-max 10
+
+  if [ $? -eq 0 ]; then
+    echo "✅ Ingestion complete"
+
+    # Get book ID and push to production
+    BOOK_ID=$(poetry run minerva list | grep "$title" | head -1 | awk '{print $1}')
+
+    if [ ! -z "$BOOK_ID" ]; then
+      echo "🚀 Pushing to production..."
+      poetry run minerva push "$BOOK_ID" --yes
+
+      if [ $? -eq 0 ]; then
+        echo "✅ Successfully pushed to production"
+      else
+        echo "❌ Failed to push to production"
+      fi
+    fi
+  else
+    echo "❌ Ingestion failed for: $title"
+  fi
+
+  echo ""
+done
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📊 Final Sync Status"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+poetry run minerva sync-status
+```
+
+Make it executable and run:
+```bash
+chmod +x advanced_batch.sh
+./advanced_batch.sh
+```
+
 ## Roadmap
 
 ### Current Features (v1.0)
 - ✅ Kindle Cloud Reader automation
 - ✅ Tesseract OCR with UI filtering
+- ✅ AI-powered OCR cleanup (optional)
 - ✅ Semantic chunking and embeddings
 - ✅ Vector search with PostgreSQL
 - ✅ Session management
+- ✅ Headless mode for server automation
 - ✅ Interactive book-end confirmation
 - ✅ Configurable navigation (delays, rewind)
 - ✅ Development search UI (Tailwind v4 + Alpine.js)
+- ✅ Multi-computer workflow (push, sync-status, list)
 - ✅ Production export/import
-- ✅ RESTful API
+- ✅ RESTful API with authentication
+- ✅ Production deployment (Fly.io + Neon)
 
 ### Planned Features (v1.1)
+- 🔲 Pull command (download books from production to local)
 - 🔲 Support for more e-book platforms
 - 🔲 OCR quality validation and retry
-- 🔲 Bulk book processing
 - 🔲 Progress resumption for failed ingestions
 - 🔲 Advanced search filters (date ranges, metadata)
+- 🔲 Rate limiting and usage analytics
 
 ### Future Considerations
 - 🔮 Support for PDFs and other document formats
@@ -1134,6 +1525,10 @@ poetry run minerva ingest 'https://read.amazon.com/?asin=B0D324DGSL&ref_=kwl_kr_
 
 poetry run minerva ingest 'https://read.amazon.com/?asin=B0FG3JWH5Y&ref_=kwl_kr_iv_aqd_des_5' --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 --title "Peptides for Beginners: The Easy Guide to Peptide Therapy for Muscle Growth, Fat Loss, Brain Boost, Anti-Aging and Longevity" --author "Wellness, VitalEdge"
 
+
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0DCW69YB1&ref_=kwl_kr_iv_aqd_asc_9' --title "Peptides A Beginners Guide: Unlock the Secrets to Anti-Aging Rapid Muscle Recovery and Youthful Skin for Optimal Health and Longevity (Peptide Wellness Collection Book 1)" --author "Publishing, OptiLife" --use-ai-formatting --rewind-presses 5 --page-delay-min 5 --page-delay-max 15 
+
+poetry run minerva ingest 'URL' --title "TITLE" --author "AUTHOR" --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 
 ---
 
 Built with ❤️ for researchers and knowledge workers
