@@ -10,7 +10,7 @@ from minerva.config import settings
 logger = structlog.get_logger(__name__)
 
 
-async def verify_api_key(x_api_key: str = Header(..., description="API key for authentication")) -> None:
+async def verify_api_key(x_api_key: str | None = Header(None, description="API key for authentication")) -> None:
     """
     Verify API key from request header.
 
@@ -19,10 +19,10 @@ async def verify_api_key(x_api_key: str = Header(..., description="API key for a
     (REQUIRE_API_KEY=false), this check is bypassed.
 
     Args:
-        x_api_key: API key from X-API-Key header
+        x_api_key: API key from X-API-Key header (optional if REQUIRE_API_KEY=false)
 
     Raises:
-        HTTPException: 401 if API key is invalid or missing
+        HTTPException: 401 if API key is invalid or missing when required
 
     Usage:
         ```python
@@ -35,6 +35,15 @@ async def verify_api_key(x_api_key: str = Header(..., description="API key for a
     if not settings.require_api_key:
         logger.debug("api_key_check_skipped", reason="authentication_disabled")
         return
+
+    # Check if API key is provided when required
+    if not x_api_key:
+        logger.warning("api_key_missing")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key is required. Provide it in the X-API-Key header.",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
 
     # Check if API key is configured
     if not settings.api_key:

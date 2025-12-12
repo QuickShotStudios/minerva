@@ -8,7 +8,8 @@
     <!-- Tailwind CSS v4 CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
-    <!-- Alpine.js v3 CDN -->
+    <!-- Alpine.js v3 CDN with Collapse plugin -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <style type="text/tailwindcss">
@@ -320,8 +321,23 @@
                         });
 
                         if (!response.ok) {
-                            const errorData = await response.json();
-                            throw new Error(errorData.detail || 'Search failed');
+                            let errorMsg = 'Search failed';
+                            try {
+                                const errorData = await response.json();
+                                console.log('Error response:', errorData);
+
+                                // Handle FastAPI validation errors
+                                if (Array.isArray(errorData.detail)) {
+                                    errorMsg = errorData.detail.map(err =>
+                                        `${err.loc.join('.')}: ${err.msg}`
+                                    ).join(', ');
+                                } else {
+                                    errorMsg = errorData.detail || errorData.message || JSON.stringify(errorData);
+                                }
+                            } catch (e) {
+                                errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                            }
+                            throw new Error(errorMsg);
                         }
 
                         const data = await response.json();
@@ -333,8 +349,9 @@
                         this.searched = true;
 
                     } catch (err) {
-                        this.error = err.message || 'An error occurred while searching';
                         console.error('Search error:', err);
+                        this.error = err.message || 'An error occurred while searching';
+                        console.error('Error message:', this.error);
                     } finally {
                         this.loading = false;
                     }

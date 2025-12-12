@@ -1526,9 +1526,13 @@ poetry run minerva ingest 'https://read.amazon.com/?asin=B0D324DGSL&ref_=kwl_kr_
 poetry run minerva ingest 'https://read.amazon.com/?asin=B0FG3JWH5Y&ref_=kwl_kr_iv_aqd_des_5' --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 --title "Peptides for Beginners: The Easy Guide to Peptide Therapy for Muscle Growth, Fat Loss, Brain Boost, Anti-Aging and Longevity" --author "Wellness, VitalEdge"
 
 
-poetry run minerva ingest 'https://read.amazon.com/?asin=B0DCW69YB1&ref_=kwl_kr_iv_aqd_asc_9' --title "Peptides A Beginners Guide: Unlock the Secrets to Anti-Aging Rapid Muscle Recovery and Youthful Skin for Optimal Health and Longevity (Peptide Wellness Collection Book 1)" --author "Publishing, OptiLife" --use-ai-formatting --rewind-presses 5 --page-delay-min 5 --page-delay-max 15 
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0DCW69YB1&ref_=kwl_kr_iv_aqd_asc_9' --title "Peptides A Beginners Guide: Unlock the Secrets to Anti-Aging Rapid Muscle Recovery and Youthful Skin for Optimal Health and Longevity (Peptide Wellness Collection Book 1)" --author "Publishing, OptiLife" --use-ai-formatting --rewind-presses 5 --page-delay-min 5 --page-delay-max 15 --headless 
 
-poetry run minerva ingest 'URL' --title "TITLE" --author "AUTHOR" --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0F9S7271C&ref_=kwl_kr_iv_aqd_asc_10' --title "The Complete Guide to Peptides: Enhance Longevity, Boost Recovery, Burn Fat, and Transform Your Skin With Science-Backed Peptide Solutions in Just Minutes a Day" --author "Glowstone, Lila" --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 --headless 
+
+poetry run minerva ingest 'https://read.amazon.com/?asin=B0F7GT17NH&ref_=kwl_kr_iv_aqd_asc_11' --title "The Complete Guide To Peptides For Women: Sculpt Your Body, Rejuvenate Your Skin and Lips, Boost Hair Growth, Enhance Collagen, and Unlock Timeless Beauty and Vitality" --author "Library, Positive Minds" --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 --headless
+
+poetry run minerva ingest 'URL' --title "TITLE" --author "AUTHOR" --use-ai-formatting --rewind-presses 10 --page-delay-min 5 --page-delay-max 15 --headless 
 ---
 
 Built with ❤️ for researchers and knowledge workers

@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 import random
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -272,16 +273,19 @@ class KindleAutomation:
             logger.error(f"Screenshot capture failed: {e}")
             raise RuntimeError(f"Failed to capture screenshot: {e}") from e
 
-    async def navigate_to_beginning(self, max_presses: int = 100) -> None:
+    async def navigate_to_beginning(self, max_presses: int = 200) -> dict[str, str | int | None]:
         """
-        Navigate to the beginning of the book.
+        Navigate to the beginning of the book with verification.
 
         This method repeatedly presses the Left arrow key to navigate backwards
         until we reach the first page. This is more reliable than Home key for
-        Kindle Cloud Reader.
+        Kindle Cloud Reader. After rewinding, it verifies we're at the beginning.
 
         Args:
-            max_presses: Maximum number of left arrow presses (default: 500)
+            max_presses: Maximum number of left arrow presses (default: 200)
+
+        Returns:
+            Dictionary with final position information after rewinding
 
         Raises:
             RuntimeError: If browser not launched
@@ -308,7 +312,42 @@ class KindleAutomation:
         # Wait for final navigation to complete and page to settle
         await asyncio.sleep(3)
 
+        # Verify we're at the beginning
+        position = await self._get_current_page_position()
+
+        # Check if we detected page 1 or location near beginning
+        at_beginning = False
+        if position["current_page"] is not None:
+            at_beginning = position["current_page"] <= 2  # Page 1 or 2 is acceptable
+        elif position["current_location"] is not None:
+            # Consider locations 1-10 as "beginning"
+            at_beginning = position["current_location"] <= 10
+
+        if at_beginning:
+            if position["page_text"]:
+                print(f"  ✓ Verified at beginning: {position['page_text']}")
+                logger.info(f"Verified at beginning: {position['page_text']}")
+            elif position["location_text"]:
+                print(f"  ✓ Verified at beginning: {position['location_text']}")
+                logger.info(f"Verified at beginning: {position['location_text']}")
+            else:
+                print(f"  ✓ At beginning (page indicators not detected)")
+                logger.info("At beginning (page indicators not detected)")
+        else:
+            # Not at beginning - warn user but continue
+            if position["page_text"]:
+                print(f"  ⚠️  Warning: May not be at page 1 - detected: {position['page_text']}")
+                logger.warning(f"May not be at beginning: {position['page_text']}")
+                print(f"  💡 Consider using --rewind-presses with a higher value")
+            elif position["location_text"]:
+                print(f"  ⚠️  Warning: May not be at beginning - detected: {position['location_text']}")
+                logger.warning(f"May not be at beginning: {position['location_text']}")
+            else:
+                print(f"  ⚠️  Warning: Could not verify position (page indicators not found)")
+                logger.warning("Could not verify position - page indicators not detected")
+
         logger.info("Navigation to beginning complete")
+        return position
 
     async def turn_page(
         self,
@@ -428,7 +467,7 @@ class KindleAutomation:
         book_title: str | None = None,
         book_author: str | None = None,
         max_pages: int = 1000,
-        rewind_presses: int = 100,
+        rewind_presses: int = 200,
         page_delay_min: float = 5.0,
         page_delay_max: float = 10.0,
     ) -> UUID:
@@ -490,9 +529,14 @@ class KindleAutomation:
                 await self.navigate_to_book(kindle_url)
 
                 # Navigate to beginning of book
-                print("Navigating to beginning of book...")
-                await self.navigate_to_beginning(max_presses=rewind_presses)
-                print("✓ At beginning of book\n")
+                print("\nNavigating to beginning of book...")
+                start_position = await self.navigate_to_beginning(max_presses=rewind_presses)
+
+                # Store the detected total pages for progress tracking
+                expected_pages = start_position.get("total_pages")
+                if expected_pages:
+                    print(f"  📖 Book has {expected_pages} pages")
+                print()
 
                 # Capture loop
                 while page_num < max_pages:
@@ -530,11 +574,20 @@ class KindleAutomation:
                     screenshot_records.append(screenshot)
                     await screenshot_repo.create(screenshot)
 
-                    # Progress display
+                    # Progress display with better context
                     elapsed = time.time() - start_time
                     rate = page_num / elapsed if elapsed > 0 else 0
+
+                    # Get current position for progress display
+                    current_position = await self._get_current_page_position()
+                    position_str = ""
+                    if current_position.get("page_text"):
+                        position_str = f" | {current_position['page_text']}"
+                    elif expected_pages:
+                        position_str = f" | ~{page_num}/{expected_pages} pages"
+
                     print(
-                        f"  📸 Page {page_num:4d} | {rate:5.2f} pages/sec | {elapsed:6.1f}s elapsed",
+                        f"  📸 Page {page_num:4d}{position_str} | {rate:5.2f} pages/sec | {elapsed:6.1f}s elapsed",
                         end="\r",
                     )
 
@@ -552,17 +605,42 @@ class KindleAutomation:
                     if not success:
                         logger.warning("Page turn may have failed")
 
-                    # Check for book end indicators
-                    is_end, reason = await self._is_book_end()
+                    # Check for book end indicators with confidence level
+                    is_end, reason, confidence = await self._is_book_end()
                     if is_end:
-                        logger.info(f"Book end indicator detected at page {page_num}: {reason}")
+                        confidence_label = ["Low", "Medium", "High"][confidence]
+                        logger.info(f"Book end indicator detected at page {page_num}: {reason} (confidence: {confidence_label})")
+
                         print(f"\n\n⚠️  Possible book end detected at page {page_num}")
-                        print(f"   Reason: {reason}")
+                        print(f"   Confidence: {confidence_label}")
+                        print(f"   Signals detected:")
+                        for signal in reason.split("; "):
+                            print(f"     • {signal}")
+
+                        # Show context
+                        if expected_pages:
+                            print(f"\n   📊 Progress: {page_num} pages captured (expected: {expected_pages})")
+                            if page_num < expected_pages * 0.8:
+                                print(f"   ⚠️  Warning: Only {page_num}/{expected_pages} pages captured ({page_num*100//expected_pages}%)")
+
                         print("\n💡 You can check the browser window to verify")
 
-                        # Interactive prompt
+                        # Interactive prompt with better default behavior
+                        # For high confidence, default to yes; for medium, no default
                         while True:
-                            response = input("\n❓ Is this the end of the book? (y/n): ").strip().lower()
+                            if confidence >= 2:  # High confidence
+                                prompt = "\n❓ Is this the end of the book? (Y/n): "
+                                default = 'y'
+                            else:  # Medium confidence
+                                prompt = "\n❓ Is this the end of the book? (y/N): "
+                                default = 'n'
+
+                            response = input(prompt).strip().lower()
+
+                            # Handle empty response (use default)
+                            if not response:
+                                response = default
+
                             if response in ['y', 'yes']:
                                 print("✓ Stopping capture as confirmed by user")
                                 logger.info("User confirmed book end")
@@ -601,6 +679,18 @@ class KindleAutomation:
                 print("✅ CAPTURE COMPLETE")
                 print(f"{'='*70}")
                 print(f"  Total Pages: {page_num}")
+
+                # Warning if capture seems incomplete
+                if expected_pages and page_num < expected_pages * 0.9:
+                    completion_pct = (page_num * 100) // expected_pages
+                    print(f"  Expected Pages: {expected_pages}")
+                    print(f"  ⚠️  WARNING: Only {page_num}/{expected_pages} pages captured ({completion_pct}%)")
+                    print(f"  💡 The book may not be fully captured. Consider:")
+                    print(f"     • Increasing --rewind-presses (try 250-300)")
+                    print(f"     • Running capture again from the beginning")
+                elif expected_pages:
+                    print(f"  Expected Pages: {expected_pages} ✓")
+
                 print(f"  Duration: {elapsed_total:.1f}s")
                 print(f"  Average Rate: {avg_rate:.2f} pages/sec")
                 print(f"  Screenshots: {screenshots_dir}")
@@ -639,20 +729,91 @@ class KindleAutomation:
                 print(f"\n❌ CAPTURE FAILED: {e}\n")
                 raise RuntimeError(f"Book capture failed: {e}") from e
 
-    async def _is_book_end(self) -> tuple[bool, str | None]:
+    async def _get_current_page_position(self) -> dict[str, str | int | None]:
+        """
+        Detect current page position from Kindle Cloud Reader UI indicators.
+
+        Returns:
+            Dictionary with position information:
+            - page_text: Raw text from page indicator (e.g., "Page 1 of 122")
+            - location_text: Raw text from location indicator (e.g., "Location 1 of 2500")
+            - current_page: Parsed current page number (if available)
+            - total_pages: Parsed total page count (if available)
+            - current_location: Parsed current location (if available)
+            - total_locations: Parsed total locations (if available)
+        """
+        position_info = {
+            "page_text": None,
+            "location_text": None,
+            "current_page": None,
+            "total_pages": None,
+            "current_location": None,
+            "total_locations": None,
+        }
+
+        if not self.page:
+            return position_info
+
+        try:
+            # Look for page indicators in common Kindle UI patterns
+            # Pattern: "Page x of y » z%"
+            # Pattern: "Location x of y « z%"
+
+            # Try to find page indicator
+            page_patterns = [
+                r"Page\s+(\d+)\s+of\s+(\d+)",
+                r"page\s+(\d+)\s+of\s+(\d+)",
+            ]
+
+            location_patterns = [
+                r"Location\s+(\d+)\s+of\s+(\d+)",
+                r"location\s+(\d+)\s+of\s+(\d+)",
+            ]
+
+            # Get page text content
+            page_content = await self.page.content()
+
+            # Try to extract page numbers
+            for pattern in page_patterns:
+                match = re.search(pattern, page_content, re.IGNORECASE)
+                if match:
+                    position_info["page_text"] = match.group(0)
+                    position_info["current_page"] = int(match.group(1))
+                    position_info["total_pages"] = int(match.group(2))
+                    break
+
+            # Try to extract location numbers
+            for pattern in location_patterns:
+                match = re.search(pattern, page_content, re.IGNORECASE)
+                if match:
+                    position_info["location_text"] = match.group(0)
+                    position_info["current_location"] = int(match.group(1))
+                    position_info["total_locations"] = int(match.group(2))
+                    break
+
+        except Exception as e:
+            logger.debug(f"Error detecting page position: {e}")
+
+        return position_info
+
+    async def _is_book_end(self) -> tuple[bool, str | None, int]:
         """
         Check if we've reached the end of the book based on UI indicators.
 
         Returns:
-            Tuple of (is_end, reason):
+            Tuple of (is_end, reason, confidence):
             - is_end: True if book end detected, False otherwise
             - reason: Description of why book end was detected (or None)
+            - confidence: 0 (low), 1 (medium), 2 (high)
         """
         if not self.page:
-            return False, None
+            return False, None, 0
+
+        detected_signals = []
+        confidence = 0
 
         try:
-            # Check if next page button is disabled or missing
+            # Check if next page button is disabled (medium signal)
             next_button_selectors = [
                 'button[aria-label="Next Page"]',
                 'button[title="Next Page"]',
@@ -664,15 +825,33 @@ class KindleAutomation:
                 if button:
                     is_disabled = await button.is_disabled()
                     if is_disabled:
-                        return True, '"Next Page" button is disabled'
+                        detected_signals.append('"Next Page" button is disabled')
+                        confidence = max(confidence, 1)  # Medium confidence
+                        break
 
-            # Check for "end of book" text indicators
-            end_indicators = ["End of Book", "The End", "Fin"]
+            # Check for "end of book" text indicators (strong signal)
+            end_indicators = ["End of Book", "The End", "Fin", "THE END"]
             for indicator in end_indicators:
                 if await self.page.locator(f"text={indicator}").count() > 0:
-                    return True, f'Found text indicator: "{indicator}"'
+                    detected_signals.append(f'Found text indicator: "{indicator}"')
+                    confidence = 2  # High confidence
+                    break
+
+            # Check if we're at the last page based on page numbers
+            position = await self._get_current_page_position()
+            if position["current_page"] and position["total_pages"]:
+                if position["current_page"] >= position["total_pages"]:
+                    detected_signals.append(
+                        f'At last page: {position["current_page"]} of {position["total_pages"]}'
+                    )
+                    confidence = 2  # High confidence
 
         except Exception as e:
             logger.debug(f"Error checking book end: {e}")
 
-        return False, None
+        # Require at least medium confidence (1+) to report book end
+        if confidence >= 1 and detected_signals:
+            reason = "; ".join(detected_signals)
+            return True, reason, confidence
+
+        return False, None, 0

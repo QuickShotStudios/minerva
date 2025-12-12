@@ -146,8 +146,8 @@ def ingest(
     ] = 1000,
     rewind_presses: Annotated[
         int,
-        typer.Option("--rewind-presses", help="Number of backward presses to reach book start (default: 100)"),
-    ] = 100,
+        typer.Option("--rewind-presses", help="Number of backward presses to reach book start (default: 200)"),
+    ] = 200,
     page_delay_min: Annotated[
         float,
         typer.Option("--page-delay-min", help="Minimum delay in seconds between page turns (default: 5.0)"),
@@ -1200,6 +1200,194 @@ def session(
     else:
         console.print(f"[red]❌ Unknown action: {action}[/red]")
         console.print("Valid actions: status, clear")
+        raise typer.Exit(code=1)
+
+
+@app.command(name="ingest-website")
+def ingest_website(
+    url: Annotated[
+        str,
+        typer.Argument(help="Website URL to scrape (e.g., https://peptidedosages.com)"),
+    ],
+    title: Annotated[
+        str | None,
+        typer.Option("--title", "-t", help="Override title (detected from site if not provided)"),
+    ] = None,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", "-a", help="Override author (uses domain if not provided)"),
+    ] = None,
+    max_pages: Annotated[
+        int | None,
+        typer.Option("--max-pages", "-n", help="Maximum pages to scrape"),
+    ] = None,
+    max_depth: Annotated[
+        int | None,
+        typer.Option("--max-depth", "-d", help="Maximum crawl depth from starting URL"),
+    ] = None,
+    include_subdomains: Annotated[
+        bool,
+        typer.Option("--include-subdomains", help="Allow scraping across subdomains"),
+    ] = False,
+    use_ai_extraction: Annotated[
+        bool,
+        typer.Option("--use-ai-extraction", help="Use AI for complex page extraction (adds cost)"),
+    ] = False,
+    lenient: Annotated[
+        bool,
+        typer.Option("--lenient", help="Use lenient quality checks for JS-heavy sites"),
+    ] = False,
+) -> None:
+    """
+    Ingest content from a website by scraping all pages.
+
+    This command will:
+    1. Discover pages via sitemap.xml or link crawling
+    2. Extract clean text and metadata from each page
+    3. Deduplicate content at page and chunk levels
+    4. Generate semantic embeddings
+    5. Store in database for semantic search
+
+    Examples:
+        # Scrape entire website
+        minerva ingest-website "https://peptidedosages.com"
+
+        # Limit to 50 pages
+        minerva ingest-website "https://example.com" --max-pages 50
+
+        # Limit crawl depth
+        minerva ingest-website "https://example.com" --max-depth 3
+
+        # Include subdomains
+        minerva ingest-website "https://example.com" --include-subdomains
+    """
+    from minerva.core.ingestion.web_scraping import (
+        DiscoveryConfig,
+        ExtractionConfig,
+        ScrapeConfig,
+        WebScraperOrchestrator,
+    )
+
+    # Validate environment
+    validate_environment()
+
+    console.print("\n[bold cyan]🌐 Minerva Website Scraper[/bold cyan]\n")
+    console.print(f"[bold]Target:[/bold] {url}")
+
+    # Display configuration
+    if max_pages:
+        console.print(f"[dim]Max pages:[/dim] {max_pages}")
+    if max_depth:
+        console.print(f"[dim]Max depth:[/dim] {max_depth}")
+    if include_subdomains:
+        console.print(f"[dim]Include subdomains:[/dim] Yes")
+    if use_ai_extraction:
+        console.print(f"[dim]AI extraction:[/dim] Enabled")
+    if lenient:
+        console.print(f"[dim]Quality checks:[/dim] Lenient (for JS-heavy sites)")
+
+    console.print()
+
+    # Apply nest_asyncio to allow better event loop management
+    import nest_asyncio
+    nest_asyncio.apply()
+
+    # Validate database
+    asyncio.run(validate_database_connectivity())
+
+    # Create configuration
+    # Lenient mode lowers quality thresholds for JS-heavy sites
+    extraction_config = ExtractionConfig(use_ai_extraction=use_ai_extraction)
+    if lenient:
+        extraction_config.min_word_count = 25  # Lower from 50
+        extraction_config.min_text_to_html_ratio = 0.02  # Lower from 0.1 (10% to 2%)
+
+    config = ScrapeConfig(
+        discovery=DiscoveryConfig(
+            domain_locked=True,
+            include_subdomains=include_subdomains,
+            max_depth=max_depth,
+            max_pages=max_pages,
+        ),
+        extraction=extraction_config,
+    )
+
+    # Run scraping
+    async def run_scrape():
+        from playwright.async_api import async_playwright
+
+        session = None
+        browser = None
+        playwright_context = None
+
+        try:
+            # Create session first
+            session = AsyncSessionLocal()
+
+            # Then create Playwright
+            playwright_context = async_playwright()
+            p = await playwright_context.__aenter__()
+            browser = await p.chromium.launch(headless=True)
+
+            # Run scraping
+            orchestrator = WebScraperOrchestrator(session, config)
+            result = await orchestrator.scrape_website(url, title=title, author=author, browser=browser)
+            return result
+
+        finally:
+            # Close in reverse order: browser first, then session, then playwright
+            if browser:
+                await browser.close()
+            if session:
+                await session.close()
+            if playwright_context:
+                await playwright_context.__aexit__(None, None, None)
+
+    try:
+        result = asyncio.run(run_scrape())
+
+        # Display summary with improved formatting
+        console.print("\n[bold green]✓ Scraping Complete![/bold green]")
+        console.print("[dim]" + "━" * 50 + "[/dim]\n")
+
+        # Results header with success rate
+        total_pages = result.success_count + result.failure_count
+        success_rate = result.success_rate
+        console.print(f"[bold]📊 Results:[/bold] {result.success_count}/{total_pages} pages ([green]{success_rate:.0f}% success rate[/green])\n")
+
+        # Show successful pages
+        if result.successes:
+            console.print(f"[bold green]✓ Successfully Scraped ({result.success_count} pages):[/bold green]")
+            for success in result.successes[:5]:  # Show first 5
+                title_display = f'"{success.title}"' if success.title else "[dim]No title[/dim]"
+                console.print(f"  • {success.url}")
+                console.print(f"    {title_display} [dim]({success.word_count:,} words)[/dim]")
+            if len(result.successes) > 5:
+                console.print(f"  [dim]... and {len(result.successes) - 5} more successful pages[/dim]")
+            console.print()
+
+        # Show failed pages
+        if result.failures:
+            console.print(f"[bold yellow]⚠️  Failed ({result.failure_count} pages):[/bold yellow]")
+            for failure in result.failures[:5]:  # Show first 5
+                console.print(f"  • {failure.url}")
+                console.print(f"    [dim]{failure.error}[/dim]")
+            if len(result.failures) > 5:
+                console.print(f"  [dim]... and {len(result.failures) - 5} more failures[/dim]")
+            console.print()
+
+        # Content statistics
+        console.print(f"[bold]📈 Content Statistics:[/bold]")
+        console.print(f"  • Total words: [cyan]{result.total_words:,}[/cyan]")
+        console.print(f"  • Chunks created: [cyan]{result.total_chunks}[/cyan]")
+
+        # Website ID (context-aware - this command only scrapes websites)
+        console.print(f"\n[bold]Website ID:[/bold] {result.book_id}")
+        console.print(f"\n[dim]💡 Search your content: minerva search \"your query\"[/dim]\n")
+
+    except Exception as e:
+        console.print(f"\n[bold red]❌ Scraping Failed:[/bold red]")
+        console.print(f"  {e}")
         raise typer.Exit(code=1)
 
 
